@@ -1,9 +1,8 @@
-import tkinter as tk
-from tkinter import messagebox, ttk
+import streamlit as st
 import random
-import csv
-import os
 import datetime
+import pandas as pd
+import io
 
 TEAMS = [
     {"name": 'United States', "emoji": '🇺🇸'},
@@ -56,127 +55,86 @@ TEAMS = [
     {"name": 'Sweden', "emoji": '🇸🇪'}
 ]
 
-class SweepstakeApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("InCyan World Cup 2026")
-        self.root.geometry("600x500")
-        self.root.configure(bg="#f8fafc")
+def init_state():
+    if "available_teams" not in st.session_state:
+        st.session_state.available_teams = TEAMS.copy()
+    if "participants" not in st.session_state:
+        st.session_state.participants = []
 
-        self.available_teams = TEAMS.copy()
-        self.participants = []
-
-        # Header
-        header_frame = tk.Frame(root, bg="#f8fafc")
-        header_frame.pack(pady=20)
+def draw_team():
+    name = st.session_state.participant_name.strip()
+    if not name:
+        st.error("Please enter a participant's name.")
+        return
         
-        tk.Label(header_frame, text="🏆 InCyan World Cup 2026", font=("Helvetica", 24, "bold"), bg="#f8fafc", fg="#0f172a").pack()
-        self.progress_label = tk.Label(header_frame, text=f"{len(self.available_teams)} teams remaining", font=("Helvetica", 12), bg="#f8fafc", fg="#64748b")
-        self.progress_label.pack()
-
-        # Input Area
-        input_frame = tk.Frame(root, bg="#ffffff", padx=20, pady=20, relief="solid", bd=1)
-        input_frame.config(highlightbackground="#e2e8f0", highlightcolor="#e2e8f0", highlightthickness=1)
-        input_frame.pack(padx=20, fill="x")
-
-        tk.Label(input_frame, text="Next Participant:", font=("Helvetica", 12, "bold"), bg="#ffffff", fg="#334155").pack(anchor="w", pady=(0,5))
+    if not st.session_state.available_teams:
+        st.warning("All 48 teams have been drawn!")
+        return
         
-        self.name_var = tk.StringVar()
-        self.name_entry = ttk.Entry(input_frame, textvariable=self.name_var, font=("Helvetica", 12))
-        self.name_entry.pack(fill="x", ipady=8, pady=(0, 10))
-        self.name_entry.bind('<Return>', lambda e: self.draw_team())
+    team = random.choice(st.session_state.available_teams)
+    st.session_state.available_teams.remove(team)
+    
+    pick_number = len(st.session_state.participants) + 1
+    
+    st.session_state.participants.append({
+        "Pick #": pick_number,
+        "Participant Name": name,
+        "Team Name": team["name"],
+        "Flag": team["emoji"]
+    })
+    
+    # Store success message to show next render
+    st.session_state.last_drawn = f"🎉 **{name}** drew **{team['emoji']} {team['name']}**!"
+    
+    # Clear the input
+    st.session_state.participant_name = ""
 
-        self.draw_button = tk.Button(input_frame, text="Draw Team", font=("Helvetica", 12, "bold"), bg="#4f46e5", fg="white", 
-                                     activebackground="#4338ca", activeforeground="white", command=self.draw_team, relief="flat", pady=10)
-        self.draw_button.pack(fill="x")
+def get_csv():
+    if not st.session_state.participants:
+        return None
+    df = pd.DataFrame(st.session_state.participants)
+    return df.to_csv(index=False).encode('utf-8')
 
-        # Results area
-        results_frame = tk.Frame(root, bg="#f8fafc")
-        results_frame.pack(padx=20, pady=20, fill="both", expand=True)
-
-        list_header_frame = tk.Frame(results_frame, bg="#f8fafc")
-        list_header_frame.pack(fill="x", pady=(0, 10))
+def main():
+    st.set_page_config(page_title="InCyan World Cup 2026", page_icon="🏆")
+    init_state()
+    
+    st.title("🏆 InCyan World Cup 2026")
+    st.markdown(f"**{len(st.session_state.available_teams)}** teams remaining")
+    
+    with st.container(border=True):
+        st.subheader("Next Participant")
+        st.text_input("Name:", key="participant_name", placeholder="Enter participant name...", on_change=draw_team)
+        st.button("Draw Team", type="primary", on_click=draw_team, use_container_width=True)
         
-        tk.Label(list_header_frame, text="Drawn Participants:", font=("Helvetica", 14, "bold"), bg="#f8fafc", fg="#1e293b").pack(side="left")
+    if "last_drawn" in st.session_state:
+        st.success(st.session_state.last_drawn)
+        del st.session_state.last_drawn
         
-        self.export_button = tk.Button(list_header_frame, text="Export CSV", font=("Helvetica", 10, "bold"), bg="#10b981", fg="white", 
-                                       command=self.export_csv, relief="flat", padx=10)
-        self.export_button.pack(side="right")
-
-        # Table
-        columns = ("pick", "name", "team")
-        self.tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=8)
-        self.tree.heading("pick", text="Pick #")
-        self.tree.column("pick", width=60, anchor="center")
-        self.tree.heading("name", text="Participant Name")
-        self.tree.column("name", width=200)
-        self.tree.heading("team", text="Team")
-        self.tree.column("team", width=250)
-        
-        scrollbar = ttk.Scrollbar(results_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        
-        self.tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-    def draw_team(self):
-        name = self.name_var.get().strip()
-        if not name:
-            messagebox.showwarning("Input Required", "Please enter a participant's name.")
-            return
+    st.divider()
+    
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        st.subheader("Drawn Participants")
+    with col2:
+        csv_data = get_csv()
+        if csv_data:
+            filename = f"InCyan_Sweepstake_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            st.download_button(
+                label="📥 Export CSV",
+                data=csv_data,
+                file_name=filename,
+                mime="text/csv",
+                use_container_width=True
+            )
             
-        if not self.available_teams:
-            messagebox.showinfo("Draw Complete", "All 48 teams have been drawn!")
-            return
-            
-        team = random.choice(self.available_teams)
-        self.available_teams.remove(team)
-        
-        pick_number = len(self.participants) + 1
-        
-        self.participants.append({
-            "pick": pick_number,
-            "name": name,
-            "team_name": team["name"],
-            "emoji": team["emoji"]
-        })
-        
+    if st.session_state.participants:
         # Display latest at top
-        display_text = f"{team['emoji']} {team['name']}"
-        self.tree.insert("", 0, values=(pick_number, name, display_text))
-        
-        self.name_var.set("")
-        self.name_entry.focus()
-        
-        self.progress_label.config(text=f"{len(self.available_teams)} teams remaining")
-        
-        if not self.available_teams:
-            messagebox.showinfo("Complete!", "The sweepstake is complete. All 48 teams have been drawn.")
-
-    def export_csv(self):
-        if not self.participants:
-            messagebox.showinfo("No Data", "No participants have been drawn yet.")
-            return
-            
-        filename = f"InCyan_Sweepstake_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        try:
-            with open(filename, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Pick #", "Participant Name", "Team Name", "Flag"])
-                for p in self.participants:
-                    writer.writerow([p["pick"], p["name"], p["team_name"], p["emoji"]])
-            
-            messagebox.showinfo("Export Success", f"Successfully exported to {filename}\n\n(Saved in the same directory as this script)")
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Failed to export CSV:\n{str(e)}")
+        reversed_list = list(reversed(st.session_state.participants))
+        df = pd.DataFrame(reversed_list)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No participants have been drawn yet.")
 
 if __name__ == "__main__":
-    # Apply some basic styling
-    root = tk.Tk()
-    style = ttk.Style()
-    style.theme_use("clam")
-    style.configure("Treeview", font=("Helvetica", 11), rowheight=30)
-    style.configure("Treeview.Heading", font=("Helvetica", 12, "bold"))
-    
-    app = SweepstakeApp(root)
-    root.mainloop()
+    main()
